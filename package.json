@@ -9,6 +9,10 @@
   "peerDependencies": {
     "typescript": "^5"
   },
+  "scripts": {
+    "start": "bun run src/index.ts",
+    "dev": "bun --watch run src/index.ts"
+  },
   "dependencies": {
     "@anthropic-ai/claude-code": "^2.1.104",
     "grammy": "^1.42.0"
