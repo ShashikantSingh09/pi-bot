@@ -1,4 +1,3 @@
-import { query, type ClaudeCodeOptions } from "@anthropic-ai/claude-code";
 import { getHistory, type Message } from "./store";
 
 const MODEL_ALIASES: Record<string, string> = {
@@ -23,6 +22,8 @@ export function setModel(input: string): string {
 
 const SYSTEM_PROMPT = `You are PlanetAgent, a personal AI assistant communicating via Telegram. You have full access to the local system (files, bash, web). Be concise in responses — Telegram messages should be readable on a phone. When executing multi-step tasks, send progress updates. Your working directory is /home/pi/AI/workspace.`;
 
+const CLAUDE_PATH = process.env.CLAUDE_PATH ?? "claude";
+
 export async function runAgent(
   chatId: string,
   userMessage: string,
@@ -38,16 +39,15 @@ export async function runAgent(
     ? `${conversationContext}\n\nHuman: ${userMessage}`
     : userMessage;
 
-  const options: ClaudeCodeOptions = {
-    prompt: fullPrompt,
-    model: currentModel,
-    systemPrompt: SYSTEM_PROMPT,
-    cwd: "/home/pi/AI/workspace",
-    dangerouslySkipPermissions: true,
-    options: {
-      maxTurns: 30,
-    },
-  };
+  const args = [
+    "--print",
+    "--model", currentModel,
+    "--system-prompt", SYSTEM_PROMPT,
+    "--dangerously-skip-permissions",
+    "--no-session-persistence",
+    "--output-format", "text",
+    fullPrompt,
+  ];
 
   // Set up a typing interval if callback provided
   let typingInterval: ReturnType<typeof setInterval> | undefined;
@@ -56,22 +56,27 @@ export async function runAgent(
   }
 
   try {
-    const messages = await query(options);
+    const proc = Bun.spawn([CLAUDE_PATH, ...args], {
+      cwd: "/home/pi/AI/workspace",
+      stdout: "pipe",
+      stderr: "pipe",
+      env: { ...process.env, NO_COLOR: "1" },
+    });
 
-    // Extract the final assistant text from the response
-    const assistantMessages = messages.filter(
-      (m) => m.type === "text" && m.role === "assistant"
-    );
+    const [stdout, stderr] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ]);
 
-    if (assistantMessages.length === 0) {
-      return "No response from Claude.";
+    const exitCode = await proc.exited;
+
+    if (exitCode !== 0) {
+      console.error("Claude stderr:", stderr);
+      return `Error running Claude (exit ${exitCode}): ${stderr.slice(0, 500)}`;
     }
 
-    // Get the last assistant message
-    const last = assistantMessages[assistantMessages.length - 1];
-    return typeof last.content === "string"
-      ? last.content
-      : JSON.stringify(last.content);
+    const text = stdout.trim();
+    return text || "No response from Claude.";
   } finally {
     if (typingInterval) clearInterval(typingInterval);
   }
