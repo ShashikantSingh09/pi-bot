@@ -4,7 +4,7 @@ import { unlink } from "fs/promises";
 const WHISPER_BIN = process.env.WHISPER_BIN ?? "/home/pi/whisper.cpp/build/bin/whisper-cli";
 const WHISPER_MODEL = process.env.WHISPER_MODEL ?? "/home/pi/whisper.cpp/models/ggml-base.bin";
 const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY ?? "";
-const ELEVENLABS_VOICE_ID = process.env.ELEVENLABS_VOICE_ID ?? "21m00Tcm4TlvDq8ikWAM"; // Rachel
+const ELEVENLABS_VOICE_ID = process.env.ELEVENLABS_VOICE_ID ?? "EXAVITQu4vr4xnSDxMaL"; // Sarah
 const TMP_DIR = "/home/pi/AI/data/tmp";
 
 mkdirSync(TMP_DIR, { recursive: true });
