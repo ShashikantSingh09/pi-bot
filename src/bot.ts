@@ -1,6 +1,8 @@
-import { Bot } from "grammy";
+import { Bot, InputFile } from "grammy";
 import { runAgent, getModel, setModel } from "./agent";
 import { saveMessage, clearHistory, messageCount } from "./store";
+import { transcribe, synthesize, cleanupTTS } from "./voice";
+import { $ } from "bun";
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 if (!TOKEN) {
@@ -42,8 +44,31 @@ bot.command("status", async (ctx) => {
       ? `${uptimeHr}h ${uptimeMin % 60}m`
       : `${uptimeMin}m`;
 
+  // Fetch Docker container status
+  let containerLines = "";
+  try {
+    const result = await $`docker ps --format "{{.Names}}\t{{.Status}}"`.text();
+    const rows = result.trim().split("\n").filter(Boolean);
+    if (rows.length === 0) {
+      containerLines = "\n\n🐳 Containers: none running";
+    } else {
+      const formatted = rows.map((row) => {
+        const [name, ...statusParts] = row.split("\t");
+        const status = statusParts.join(" ");
+        const icon = status.toLowerCase().includes("unhealthy") ? "🔴"
+          : status.toLowerCase().includes("healthy") ? "🟢"
+          : status.toLowerCase().includes("up") ? "🔵"
+          : "⚪";
+        return `${icon} ${name}: ${status}`;
+      });
+      containerLines = "\n\n🐳 Containers:\n" + formatted.join("\n");
+    }
+  } catch {
+    containerLines = "\n\n🐳 Containers: unavailable";
+  }
+
   await ctx.reply(
-    `Status:\n• Model: ${getModel()}\n• Messages: ${count}\n• Uptime: ${uptime}`
+    `📊 Status:\n• Model: ${getModel()}\n• Messages: ${count}\n• Uptime: ${uptime}${containerLines}`
   );
 });
 
@@ -87,6 +112,71 @@ bot.on("message:text", async (ctx) => {
       err instanceof Error ? err.message : "Unknown error";
     console.error("Agent error:", msg);
     await ctx.reply(`Error: ${msg}`);
+  }
+});
+
+// Voice message handler
+bot.on("message:voice", async (ctx) => {
+  const chatId = String(ctx.chat.id);
+
+  await ctx.replyWithChatAction("typing");
+
+  try {
+    // Download the voice file
+    const file = await ctx.getFile();
+    const filePath = file.file_path;
+    if (!filePath) throw new Error("Could not get voice file path");
+
+    const url = `https://api.telegram.org/file/bot${TOKEN}/${filePath}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`Failed to download voice: ${res.status}`);
+
+    const oggPath = `/home/pi/AI/data/tmp/${Date.now()}-voice.ogg`;
+    const { mkdirSync } = await import("fs");
+    mkdirSync("/home/pi/AI/data/tmp", { recursive: true });
+    await Bun.write(oggPath, await res.arrayBuffer());
+
+    // Transcribe
+    const text = await transcribe(oggPath);
+    await (await import("fs/promises")).unlink(oggPath).catch(() => {});
+
+    if (!text) {
+      await ctx.reply("Could not transcribe voice message.");
+      return;
+    }
+
+    // Save and process like a text message
+    saveMessage(chatId, "user", text);
+    await ctx.replyWithChatAction("typing");
+
+    const response = await runAgent(chatId, text, () => {
+      ctx.replyWithChatAction("typing").catch(() => {});
+    });
+
+    saveMessage(chatId, "assistant", response);
+
+    // Send as voice reply
+    try {
+      const oggOut = await synthesize(response);
+      await ctx.replyWithVoice(new InputFile(oggOut));
+      await cleanupTTS(oggOut);
+    } catch (ttsErr) {
+      console.error("TTS failed, falling back to text:", ttsErr);
+      const chunks = splitMessage(response, 4096);
+      for (const chunk of chunks) {
+        await ctx.reply(chunk);
+      }
+    }
+
+    // Also send as text for readability
+    const chunks = splitMessage(response, 4096);
+    for (const chunk of chunks) {
+      await ctx.reply(chunk);
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Unknown error";
+    console.error("Voice error:", msg);
+    await ctx.reply(`Error processing voice: ${msg}`);
   }
 });
 
