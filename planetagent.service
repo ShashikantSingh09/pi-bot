@@ -1,0 +1,18 @@
+[Unit]
+Description=PlanetAgent Telegram Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/AI
+EnvironmentFile=/home/pi/AI/.env
+ExecStart=/home/pi/.local/bin/bun run src/index.ts
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
