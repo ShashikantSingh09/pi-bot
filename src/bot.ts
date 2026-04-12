@@ -120,8 +120,9 @@ bot.on("message:text", async (ctx) => {
   await ctx.replyWithChatAction("typing");
 
   try {
-    const response = await runAgent(chatId, text, () => {
-      ctx.replyWithChatAction("typing").catch(() => {});
+    const response = await runAgent(chatId, text, {
+      onActivity: () => { ctx.replyWithChatAction("typing").catch(() => {}); },
+      voiceMode: voiceReplyEnabled,
     });
 
     // Save assistant response
@@ -193,8 +194,9 @@ bot.on("message:voice", async (ctx) => {
     saveMessage(chatId, "user", text);
     await ctx.replyWithChatAction("typing");
 
-    const response = await runAgent(chatId, text, () => {
-      ctx.replyWithChatAction("typing").catch(() => {});
+    const response = await runAgent(chatId, text, {
+      onActivity: () => { ctx.replyWithChatAction("typing").catch(() => {}); },
+      voiceMode: voiceReplyEnabled,
     });
 
     saveMessage(chatId, "assistant", response);
