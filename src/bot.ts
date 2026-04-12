@@ -18,6 +18,7 @@ if (!OWNER_ID) {
 
 export const bot = new Bot(TOKEN);
 const startTime = Date.now();
+let voiceReplyEnabled = false;
 
 // Access control: only allow owner
 bot.use(async (ctx, next) => {
@@ -81,6 +82,16 @@ bot.command("model", async (ctx) => {
   }
   const resolved = setModel(arg);
   await ctx.reply(`Model switched to: ${resolved}`);
+});
+
+// /voice command — toggle voice replies for voice messages
+bot.command("voice", async (ctx) => {
+  voiceReplyEnabled = !voiceReplyEnabled;
+  await ctx.reply(
+    voiceReplyEnabled
+      ? "Voice replies: ON — voice messages will get voice + text replies."
+      : "Voice replies: OFF — voice messages will get text-only replies."
+  );
 });
 
 // Message handler
@@ -155,20 +166,18 @@ bot.on("message:voice", async (ctx) => {
 
     saveMessage(chatId, "assistant", response);
 
-    // Send as voice reply
-    try {
-      const oggOut = await synthesize(response);
-      await ctx.replyWithVoice(new InputFile(oggOut));
-      await cleanupTTS(oggOut);
-    } catch (ttsErr) {
-      console.error("TTS failed, falling back to text:", ttsErr);
-      const chunks = splitMessage(response, 4096);
-      for (const chunk of chunks) {
-        await ctx.reply(chunk);
+    if (voiceReplyEnabled) {
+      // Send voice reply + text
+      try {
+        const oggOut = await synthesize(response);
+        await ctx.replyWithVoice(new InputFile(oggOut));
+        await cleanupTTS(oggOut);
+      } catch (ttsErr) {
+        console.error("TTS failed, falling back to text:", ttsErr);
       }
     }
 
-    // Also send as text for readability
+    // Always send text reply
     const chunks = splitMessage(response, 4096);
     for (const chunk of chunks) {
       await ctx.reply(chunk);
