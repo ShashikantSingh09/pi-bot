@@ -18,7 +18,20 @@ if (!OWNER_ID) {
 
 export const bot = new Bot(TOKEN);
 const startTime = Date.now();
-let voiceReplyEnabled = false;
+
+// Persist voice toggle to disk so it survives restarts
+const VOICE_STATE_FILE = "data/voice-state.json";
+let voiceReplyEnabled = (() => {
+  try {
+    const data = JSON.parse(require("fs").readFileSync(VOICE_STATE_FILE, "utf8"));
+    return data.enabled === true;
+  } catch { return false; }
+})();
+
+function saveVoiceState() {
+  require("fs").mkdirSync("data", { recursive: true });
+  require("fs").writeFileSync(VOICE_STATE_FILE, JSON.stringify({ enabled: voiceReplyEnabled }));
+}
 
 // Access control: only allow owner
 bot.use(async (ctx, next) => {
@@ -84,13 +97,14 @@ bot.command("model", async (ctx) => {
   await ctx.reply(`Model switched to: ${resolved}`);
 });
 
-// /voice command — toggle voice replies for voice messages
+// /voice command — toggle voice replies for all messages
 bot.command("voice", async (ctx) => {
   voiceReplyEnabled = !voiceReplyEnabled;
+  saveVoiceState();
   await ctx.reply(
     voiceReplyEnabled
-      ? "Voice replies: ON — voice messages will get voice + text replies."
-      : "Voice replies: OFF — voice messages will get text-only replies."
+      ? "🔊 Voice replies: ON — all replies will include a voice message."
+      : "🔇 Voice replies: OFF — text-only replies."
   );
 });
 
@@ -113,7 +127,26 @@ bot.on("message:text", async (ctx) => {
     // Save assistant response
     saveMessage(chatId, "assistant", response);
 
-    // Split long messages (Telegram limit: 4096 chars)
+    if (voiceReplyEnabled) {
+      try {
+        await ctx.replyWithChatAction("record_voice");
+        const oggOut = await synthesize(response);
+        await ctx.replyWithVoice(new InputFile(oggOut));
+        await cleanupTTS(oggOut);
+        // Send text only if response has URLs, code blocks, or links
+        if (hasTextContent(response)) {
+          const chunks = splitMessage(response, 4096);
+          for (const chunk of chunks) {
+            await ctx.reply(chunk);
+          }
+        }
+        return;
+      } catch (ttsErr) {
+        console.error("TTS failed, falling back to text:", ttsErr);
+      }
+    }
+
+    // Text-only reply (voice off or TTS failed)
     const chunks = splitMessage(response, 4096);
     for (const chunk of chunks) {
       await ctx.reply(chunk);
@@ -167,17 +200,23 @@ bot.on("message:voice", async (ctx) => {
     saveMessage(chatId, "assistant", response);
 
     if (voiceReplyEnabled) {
-      // Send voice reply + text
       try {
+        await ctx.replyWithChatAction("record_voice");
         const oggOut = await synthesize(response);
         await ctx.replyWithVoice(new InputFile(oggOut));
         await cleanupTTS(oggOut);
+        if (hasTextContent(response)) {
+          const chunks = splitMessage(response, 4096);
+          for (const chunk of chunks) {
+            await ctx.reply(chunk);
+          }
+        }
+        return;
       } catch (ttsErr) {
         console.error("TTS failed, falling back to text:", ttsErr);
       }
     }
 
-    // Always send text reply
     const chunks = splitMessage(response, 4096);
     for (const chunk of chunks) {
       await ctx.reply(chunk);
@@ -188,6 +227,16 @@ bot.on("message:voice", async (ctx) => {
     await ctx.reply(`Error processing voice: ${msg}`);
   }
 });
+
+// Returns true if the response contains content that needs to be seen as text
+// (URLs, code blocks, file paths, commands, etc.)
+function hasTextContent(text: string): boolean {
+  return /https?:\/\//.test(text) ||      // URLs
+    /```/.test(text) ||                    // code blocks
+    /`[^`]+`/.test(text) ||               // inline code
+    /\/[\w./-]+\.\w+/.test(text) ||       // file paths
+    /\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/.test(text); // IP addresses
+}
 
 function splitMessage(text: string, limit: number): string[] {
   if (text.length <= limit) return [text];
