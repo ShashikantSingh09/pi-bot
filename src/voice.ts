@@ -3,8 +3,8 @@ import { unlink } from "fs/promises";
 
 const WHISPER_BIN = process.env.WHISPER_BIN ?? "/home/pi/whisper.cpp/build/bin/whisper-cli";
 const WHISPER_MODEL = process.env.WHISPER_MODEL ?? "/home/pi/whisper.cpp/models/ggml-base.bin";
-const PIPER_BIN = process.env.PIPER_BIN ?? "/home/pi/piper/piper/piper";
-const PIPER_MODEL = process.env.PIPER_MODEL ?? "/home/pi/piper/voices/en_US-lessac-medium.onnx";
+const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY ?? "";
+const ELEVENLABS_VOICE_ID = process.env.ELEVENLABS_VOICE_ID ?? "21m00Tcm4TlvDq8ikWAM"; // Rachel
 const TMP_DIR = "/home/pi/AI/data/tmp";
 
 mkdirSync(TMP_DIR, { recursive: true });
@@ -44,47 +44,52 @@ export async function transcribe(oggPath: string): Promise<string> {
 }
 
 /**
- * Convert text to speech using piper, returns path to OGG file
+ * Convert text to speech using ElevenLabs API, returns path to OGG file
  */
 export async function synthesize(text: string): Promise<string> {
-  const wavPath = `${TMP_DIR}/${Date.now()}-tts.wav`;
+  if (!ELEVENLABS_API_KEY) {
+    throw new Error("ELEVENLABS_API_KEY not set");
+  }
+
   const oggPath = `${TMP_DIR}/${Date.now()}-tts.ogg`;
 
-  try {
-    // Run piper to generate WAV
-    const piper = Bun.spawn(
-      [PIPER_BIN, "--model", PIPER_MODEL, "--output_file", wavPath],
-      {
-        stdin: "pipe",
-        stdout: "pipe",
-        stderr: "pipe",
-        env: {
-          ...process.env,
-          LD_LIBRARY_PATH: "/home/pi/piper/piper",
+  const res = await fetch(
+    `https://api.elevenlabs.io/v1/text-to-speech/${ELEVENLABS_VOICE_ID}`,
+    {
+      method: "POST",
+      headers: {
+        "xi-api-key": ELEVENLABS_API_KEY,
+        "Content-Type": "application/json",
+        Accept: "audio/mpeg",
+      },
+      body: JSON.stringify({
+        text,
+        model_id: "eleven_turbo_v2_5",
+        voice_settings: {
+          stability: 0.5,
+          similarity_boost: 0.75,
         },
-      }
-    );
-
-    piper.stdin.write(text);
-    piper.stdin.end();
-
-    const exitCode = await piper.exited;
-    if (exitCode !== 0) {
-      const stderr = await new Response(piper.stderr).text();
-      throw new Error(`Piper failed (exit ${exitCode}): ${stderr.slice(0, 200)}`);
+      }),
     }
+  );
 
-    // Convert WAV to OGG (Telegram voice format)
-    const ffmpeg = Bun.spawn(
-      ["ffmpeg", "-y", "-i", wavPath, "-c:a", "libopus", "-b:a", "64k", oggPath],
-      { stdout: "pipe", stderr: "pipe" }
-    );
-    await ffmpeg.exited;
-
-    return oggPath;
-  } finally {
-    await unlink(wavPath).catch(() => {});
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`ElevenLabs API error (${res.status}): ${body.slice(0, 200)}`);
   }
+
+  // ElevenLabs returns MP3, convert to OGG (Telegram voice format)
+  const mp3Path = `${TMP_DIR}/${Date.now()}-tts.mp3`;
+  await Bun.write(mp3Path, await res.arrayBuffer());
+
+  const ffmpeg = Bun.spawn(
+    ["ffmpeg", "-y", "-i", mp3Path, "-c:a", "libopus", "-b:a", "64k", oggPath],
+    { stdout: "pipe", stderr: "pipe" }
+  );
+  await ffmpeg.exited;
+  await unlink(mp3Path).catch(() => {});
+
+  return oggPath;
 }
 
 /**
