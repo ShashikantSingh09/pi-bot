@@ -12,6 +12,8 @@ const DEFAULT_MODEL = "claude-sonnet-4-6";
 const PERSONALITY_DIR = join(import.meta.dir, "..", "personality");
 
 let currentModel = DEFAULT_MODEL;
+let messagesSinceLastLearn = 0;
+const LEARN_EVERY_N_MESSAGES = 10;
 
 export function getModel(): string {
   return currentModel;
@@ -63,8 +65,8 @@ export async function runAgent(
     "--model", currentModel,
     "--system-prompt", systemPrompt,
     "--dangerously-skip-permissions",
-    "--output-format", "json",
-    "--add-dir", PERSONALITY_DIR,
+    "--no-session-persistence",
+    "--output-format", "text",
     fullPrompt,
   ];
 
@@ -93,36 +95,72 @@ export async function runAgent(
       return `Error running Claude (exit ${exitCode}): ${stderr.slice(0, 500)}`;
     }
 
-    // Parse JSON output to extract the final assistant text
-    try {
-      const result = JSON.parse(stdout);
+    const text = stdout.trim();
 
-      // result.result is the final text, or result may have a different shape
-      // Claude --print --output-format json returns: { result: "text", ... }
-      if (result.result) {
-        return result.result.trim();
-      }
-
-      // Fallback: look for the last assistant message in the messages array
-      if (Array.isArray(result)) {
-        const assistantMsgs = result.filter(
-          (m: any) => m.role === "assistant" && m.type === "text"
-        );
-        if (assistantMsgs.length > 0) {
-          const last = assistantMsgs[assistantMsgs.length - 1];
-          return typeof last.content === "string"
-            ? last.content.trim()
-            : JSON.stringify(last.content);
-        }
-      }
-
-      // Last resort: stringify
-      return stdout.trim();
-    } catch {
-      // If JSON parse fails, return raw text
-      return stdout.trim() || "No response from Claude.";
+    // Trigger background learning every N messages
+    messagesSinceLastLearn++;
+    if (messagesSinceLastLearn >= LEARN_EVERY_N_MESSAGES) {
+      messagesSinceLastLearn = 0;
+      learnInBackground(chatId);
     }
+
+    return text || "No response from Claude.";
   } finally {
     if (typingInterval) clearInterval(typingInterval);
   }
+}
+
+/**
+ * Run a background learning pass — reviews recent conversation history
+ * and updates personality files (memory.md, user.md, tools.md)
+ */
+function learnInBackground(chatId: string) {
+  const history = getHistory(chatId, 30);
+  if (history.length < 5) return;
+
+  const conversation = history
+    .map((m: Message) => `${m.role === "user" ? "Human" : "Assistant"}: ${m.content}`)
+    .join("\n\n");
+
+  const learnPrompt = `Review this recent conversation and update the personality/memory files if you learned anything new.
+
+## Recent Conversation
+${conversation}
+
+## Your Task
+1. Read /home/pi/AI/personality/memory.md
+2. If you learned new preferences, systems, patterns, or lessons — update the relevant section
+3. Read /home/pi/AI/personality/user.md — update if you learned something new about the boss
+4. Read /home/pi/AI/personality/tools.md — update if you discovered new infrastructure
+5. Keep entries concise. One line per fact. Don't duplicate existing entries
+6. If nothing new was learned, do nothing
+
+Only update files if there's genuinely new information. Don't rewrite existing content.`;
+
+  const args = [
+    "--print",
+    "--model", "claude-haiku-4-5-20251001",
+    "--dangerously-skip-permissions",
+    "--no-session-persistence",
+    "--output-format", "text",
+    "--add-dir", PERSONALITY_DIR,
+    learnPrompt,
+  ];
+
+  // Fire and forget — don't block the response
+  const proc = Bun.spawn([CLAUDE_PATH, ...args], {
+    cwd: "/home/pi/AI/workspace",
+    stdout: "ignore",
+    stderr: "pipe",
+  });
+
+  proc.exited.then((code) => {
+    if (code !== 0) {
+      new Response(proc.stderr).text().then((err) => {
+        console.error("Learning pass failed:", err.slice(0, 200));
+      });
+    } else {
+      console.log("Learning pass completed");
+    }
+  });
 }
