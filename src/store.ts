@@ -1,9 +1,11 @@
 import { Database } from "bun:sqlite";
 import { mkdirSync } from "fs";
+import { join } from "path";
 
-const DB_PATH = process.env.DB_PATH ?? "data/planetagent.db";
+const DATA_DIR = join(import.meta.dir, "..", "data");
+const DB_PATH = process.env.DB_PATH ?? join(DATA_DIR, "planetagent.db");
 
-mkdirSync("data", { recursive: true });
+mkdirSync(DATA_DIR, { recursive: true });
 
 const db = new Database(DB_PATH);
 db.exec("PRAGMA journal_mode=WAL");

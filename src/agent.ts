@@ -91,7 +91,7 @@ const CLAUDE_PATH = process.env.CLAUDE_PATH ?? "/home/pi/.local/bin/claude";
 export async function runAgent(
   chatId: string,
   userMessage: string,
-  options?: { onActivity?: () => void; voiceMode?: boolean }
+  options?: { onActivity?: () => void; voiceMode?: boolean; imagePath?: string }
 ): Promise<string> {
   const history = getHistory(chatId);
 
@@ -99,9 +99,10 @@ export async function runAgent(
     .map((m: Message) => `${m.role === "user" ? "Human" : "Assistant"}: ${m.content}`)
     .join("\n\n");
 
+  const prefix = options?.imagePath ? "[Image attached] " : "";
   const fullPrompt = conversationContext
-    ? `${conversationContext}\n\nHuman: ${userMessage}`
-    : userMessage;
+    ? `${conversationContext}\n\nHuman: ${prefix}${userMessage}`
+    : `${prefix}${userMessage}`;
 
   const systemPrompt = loadPersonality(options?.voiceMode ?? false);
 
@@ -114,6 +115,9 @@ export async function runAgent(
     "--output-format", "text",
     fullPrompt,
   ];
+
+  // Append image path as positional arg for Claude vision
+  if (options?.imagePath) args.push(options.imagePath);
 
   let typingInterval: ReturnType<typeof setInterval> | undefined;
   if (options?.onActivity) {
@@ -155,72 +159,14 @@ export async function runAgent(
   }
 }
 
+// Backward-compatible alias
 export async function runAgentWithImage(
   chatId: string,
   userMessage: string,
   imagePath: string,
   options?: { onActivity?: () => void; voiceMode?: boolean }
 ): Promise<string> {
-  const history = getHistory(chatId);
-
-  const conversationContext = history
-    .map((m: Message) => `${m.role === "user" ? "Human" : "Assistant"}: ${m.content}`)
-    .join("\n\n");
-
-  const fullPrompt = conversationContext
-    ? `${conversationContext}\n\nHuman: [Image attached] ${userMessage}`
-    : `[Image attached] ${userMessage}`;
-
-  const systemPrompt = loadPersonality(options?.voiceMode ?? false);
-
-  const args = [
-    "--print",
-    "--model", currentModel,
-    "--system-prompt", systemPrompt,
-    "--dangerously-skip-permissions",
-    "--no-session-persistence",
-    "--output-format", "text",
-    fullPrompt,
-    imagePath,
-  ];
-
-  let typingInterval: ReturnType<typeof setInterval> | undefined;
-  if (options?.onActivity) {
-    typingInterval = setInterval(options.onActivity, 4000);
-  }
-
-  try {
-    const proc = Bun.spawn([CLAUDE_PATH, ...args], {
-      cwd: "/home/pi/AI/workspace",
-      stdout: "pipe",
-      stderr: "pipe",
-      env: { ...process.env, NO_COLOR: "1" },
-    });
-
-    const [stdout, stderr] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ]);
-
-    const exitCode = await proc.exited;
-
-    if (exitCode !== 0) {
-      console.error("Claude stderr:", stderr);
-      return `Error running Claude (exit ${exitCode}): ${stderr.slice(0, 500)}`;
-    }
-
-    const text = stdout.trim();
-
-    messagesSinceLastLearn++;
-    if (messagesSinceLastLearn >= LEARN_EVERY_N_MESSAGES) {
-      messagesSinceLastLearn = 0;
-      learnInBackground(chatId);
-    }
-
-    return text || "No response from Claude.";
-  } finally {
-    if (typingInterval) clearInterval(typingInterval);
-  }
+  return runAgent(chatId, userMessage, { ...options, imagePath });
 }
 
 /**

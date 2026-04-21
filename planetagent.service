@@ -11,6 +11,8 @@ EnvironmentFile=/home/pi/AI/.env
 ExecStart=/home/pi/.local/bin/bun run src/index.ts
 Restart=on-failure
 RestartSec=10
+KillSignal=SIGTERM
+TimeoutStopSec=5
 StandardOutput=journal
 StandardError=journal
 
