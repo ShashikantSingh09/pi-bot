@@ -9,7 +9,7 @@ This file contains durable facts, preferences, and patterns learned from convers
 - Wants morning briefings at 7 AM via Telegram with: Lucknow weather, system status, security intel, AI news, market intel, competitor watch
 - Wants Telegram alerts when system goes critical (disk >90%, RAM >85%, CPU >80°C, service down)
 - Located in **Lucknow, India** — use Lucknow for weather
-- Email: singh.shashikant66@gmail.com
+- Email: (configured locally)
 
 ### Known Systems & Services
 
