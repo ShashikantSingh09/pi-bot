@@ -11,7 +11,7 @@
 
 ## Services to Monitor
 
-- PlanetAgent bot (systemd: planetagent)
+- Pi bot (systemd: planetagent)
 - Docker containers (check with: docker ps)
 - System health (disk, memory, CPU, network)
 
