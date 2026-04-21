@@ -2,6 +2,7 @@ import { Bot, InputFile } from "grammy";
 import { runAgent, getModel, setModel } from "./agent";
 import { saveMessage, clearHistory, messageCount } from "./store";
 import { transcribe, synthesize, cleanupTTS } from "./voice";
+import { sendFormattedReply } from "./format";
 import { $ } from "bun";
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
@@ -136,10 +137,7 @@ bot.on("message:text", async (ctx) => {
         await cleanupTTS(oggOut);
         // Send text only if response has URLs, code blocks, or links
         if (hasTextContent(response)) {
-          const chunks = splitMessage(response, 4096);
-          for (const chunk of chunks) {
-            await ctx.reply(chunk);
-          }
+          await sendFormattedReply(ctx, response);
         }
         return;
       } catch (ttsErr) {
@@ -148,10 +146,7 @@ bot.on("message:text", async (ctx) => {
     }
 
     // Text-only reply (voice off or TTS failed)
-    const chunks = splitMessage(response, 4096);
-    for (const chunk of chunks) {
-      await ctx.reply(chunk);
-    }
+    await sendFormattedReply(ctx, response);
   } catch (err) {
     const msg =
       err instanceof Error ? err.message : "Unknown error";
@@ -208,10 +203,7 @@ bot.on("message:voice", async (ctx) => {
         await ctx.replyWithVoice(new InputFile(oggOut));
         await cleanupTTS(oggOut);
         if (hasTextContent(response)) {
-          const chunks = splitMessage(response, 4096);
-          for (const chunk of chunks) {
-            await ctx.reply(chunk);
-          }
+          await sendFormattedReply(ctx, response);
         }
         return;
       } catch (ttsErr) {
@@ -219,10 +211,7 @@ bot.on("message:voice", async (ctx) => {
       }
     }
 
-    const chunks = splitMessage(response, 4096);
-    for (const chunk of chunks) {
-      await ctx.reply(chunk);
-    }
+    await sendFormattedReply(ctx, response);
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Unknown error";
     console.error("Voice error:", msg);
@@ -240,20 +229,3 @@ function hasTextContent(text: string): boolean {
     /\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/.test(text); // IP addresses
 }
 
-function splitMessage(text: string, limit: number): string[] {
-  if (text.length <= limit) return [text];
-  const chunks: string[] = [];
-  let remaining = text;
-  while (remaining.length > 0) {
-    if (remaining.length <= limit) {
-      chunks.push(remaining);
-      break;
-    }
-    // Try to split at last newline before limit
-    let splitAt = remaining.lastIndexOf("\n", limit);
-    if (splitAt <= 0) splitAt = limit;
-    chunks.push(remaining.slice(0, splitAt));
-    remaining = remaining.slice(splitAt).trimStart();
-  }
-  return chunks;
-}
