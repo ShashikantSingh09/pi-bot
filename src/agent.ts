@@ -63,8 +63,8 @@ export async function runAgent(
     "--model", currentModel,
     "--system-prompt", systemPrompt,
     "--dangerously-skip-permissions",
-    "--no-session-persistence",
-    "--output-format", "text",
+    "--output-format", "json",
+    "--add-dir", PERSONALITY_DIR,
     fullPrompt,
   ];
 
@@ -93,8 +93,35 @@ export async function runAgent(
       return `Error running Claude (exit ${exitCode}): ${stderr.slice(0, 500)}`;
     }
 
-    const text = stdout.trim();
-    return text || "No response from Claude.";
+    // Parse JSON output to extract the final assistant text
+    try {
+      const result = JSON.parse(stdout);
+
+      // result.result is the final text, or result may have a different shape
+      // Claude --print --output-format json returns: { result: "text", ... }
+      if (result.result) {
+        return result.result.trim();
+      }
+
+      // Fallback: look for the last assistant message in the messages array
+      if (Array.isArray(result)) {
+        const assistantMsgs = result.filter(
+          (m: any) => m.role === "assistant" && m.type === "text"
+        );
+        if (assistantMsgs.length > 0) {
+          const last = assistantMsgs[assistantMsgs.length - 1];
+          return typeof last.content === "string"
+            ? last.content.trim()
+            : JSON.stringify(last.content);
+        }
+      }
+
+      // Last resort: stringify
+      return stdout.trim();
+    } catch {
+      // If JSON parse fails, return raw text
+      return stdout.trim() || "No response from Claude.";
+    }
   } finally {
     if (typingInterval) clearInterval(typingInterval);
   }
