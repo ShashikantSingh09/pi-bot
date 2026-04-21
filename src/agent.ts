@@ -26,7 +26,7 @@ export function setModel(input: string): string {
 }
 
 function loadPersonality(voiceMode: boolean): string {
-  const files = ["soul.md", "user.md", "rules.md", "tools.md", "memory.md"];
+  const files = ["identity.md", "soul.md", "user.md", "rules.md", "tools.md", "memory.md"];
   if (voiceMode) files.push("voice.md");
 
   const sections: string[] = [];
