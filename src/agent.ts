@@ -25,11 +25,35 @@ export function setModel(input: string): string {
   return resolved;
 }
 
+function getTimeContext(): string {
+  const now = new Date();
+  const options: Intl.DateTimeFormatOptions = {
+    timeZone: "Asia/Kolkata",
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
+  };
+  const formatted = now.toLocaleString("en-IN", options);
+  const hour = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Kolkata" })).getHours();
+
+  let timeOfDay: string;
+  if (hour >= 5 && hour < 12) timeOfDay = "morning";
+  else if (hour >= 12 && hour < 17) timeOfDay = "afternoon";
+  else if (hour >= 17 && hour < 21) timeOfDay = "evening";
+  else timeOfDay = "night";
+
+  return `[Current time: ${formatted} | ${timeOfDay} in Lucknow, India]`;
+}
+
 function loadPersonality(voiceMode: boolean): string {
   const files = ["identity.md", "soul.md", "user.md", "rules.md", "tools.md", "memory.md"];
   if (voiceMode) files.push("voice.md");
 
-  const sections: string[] = [];
+  const sections: string[] = [getTimeContext()];
   for (const file of files) {
     try {
       const content = readFileSync(join(PERSONALITY_DIR, file), "utf8").trim();
