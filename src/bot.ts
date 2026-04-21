@@ -219,6 +219,68 @@ bot.on("message:voice", async (ctx) => {
   }
 });
 
+// Photo message handler
+bot.on("message:photo", async (ctx) => {
+  const chatId = String(ctx.chat.id);
+  const caption = ctx.message.caption || "What do you see in this image?";
+
+  await ctx.replyWithChatAction("typing");
+
+  try {
+    // Get the highest resolution photo
+    const photos = ctx.message.photo;
+    const photo = photos[photos.length - 1];
+    const file = await ctx.api.getFile(photo.file_id);
+    const filePath = file.file_path;
+    if (!filePath) throw new Error("Could not get photo file path");
+
+    const url = `https://api.telegram.org/file/bot${TOKEN}/${filePath}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`Failed to download photo: ${res.status}`);
+
+    const imgPath = `/home/pi/AI/data/tmp/${Date.now()}-photo.jpg`;
+    const { mkdirSync } = await import("fs");
+    mkdirSync("/home/pi/AI/data/tmp", { recursive: true });
+    await Bun.write(imgPath, await res.arrayBuffer());
+
+    // Save caption as user message
+    saveMessage(chatId, "user", `[Sent a photo] ${caption}`);
+
+    // Run claude with the image
+    const { runAgentWithImage } = await import("./agent");
+    const response = await runAgentWithImage(chatId, caption, imgPath, {
+      onActivity: () => { ctx.replyWithChatAction("typing").catch(() => {}); },
+      voiceMode: voiceReplyEnabled,
+    });
+
+    saveMessage(chatId, "assistant", response);
+
+    // Clean up image
+    await (await import("fs/promises")).unlink(imgPath).catch(() => {});
+
+    if (voiceReplyEnabled) {
+      try {
+        await ctx.replyWithChatAction("record_voice");
+        const oggOut = await synthesize(response);
+        await ctx.replyWithVoice(new InputFile(oggOut));
+        await cleanupTTS(oggOut);
+        if (hasTextContent(response)) {
+          await sendFormattedReply(ctx, response);
+        }
+        return;
+      } catch (ttsErr) {
+        console.error("TTS failed, falling back to text:", ttsErr);
+      }
+    }
+
+    await sendFormattedReply(ctx, response);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Unknown error";
+    console.error("Photo error:", msg);
+    await ctx.reply(`Error processing photo: ${msg}`);
+  }
+});
+
 // Returns true if the response contains content that needs to be seen as text
 // (URLs, code blocks, file paths, commands, etc.)
 function hasTextContent(text: string): boolean {

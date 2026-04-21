@@ -155,6 +155,74 @@ export async function runAgent(
   }
 }
 
+export async function runAgentWithImage(
+  chatId: string,
+  userMessage: string,
+  imagePath: string,
+  options?: { onActivity?: () => void; voiceMode?: boolean }
+): Promise<string> {
+  const history = getHistory(chatId);
+
+  const conversationContext = history
+    .map((m: Message) => `${m.role === "user" ? "Human" : "Assistant"}: ${m.content}`)
+    .join("\n\n");
+
+  const fullPrompt = conversationContext
+    ? `${conversationContext}\n\nHuman: [Image attached] ${userMessage}`
+    : `[Image attached] ${userMessage}`;
+
+  const systemPrompt = loadPersonality(options?.voiceMode ?? false);
+
+  const args = [
+    "--print",
+    "--model", currentModel,
+    "--system-prompt", systemPrompt,
+    "--dangerously-skip-permissions",
+    "--no-session-persistence",
+    "--output-format", "text",
+    fullPrompt,
+    imagePath,
+  ];
+
+  let typingInterval: ReturnType<typeof setInterval> | undefined;
+  if (options?.onActivity) {
+    typingInterval = setInterval(options.onActivity, 4000);
+  }
+
+  try {
+    const proc = Bun.spawn([CLAUDE_PATH, ...args], {
+      cwd: "/home/pi/AI/workspace",
+      stdout: "pipe",
+      stderr: "pipe",
+      env: { ...process.env, NO_COLOR: "1" },
+    });
+
+    const [stdout, stderr] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ]);
+
+    const exitCode = await proc.exited;
+
+    if (exitCode !== 0) {
+      console.error("Claude stderr:", stderr);
+      return `Error running Claude (exit ${exitCode}): ${stderr.slice(0, 500)}`;
+    }
+
+    const text = stdout.trim();
+
+    messagesSinceLastLearn++;
+    if (messagesSinceLastLearn >= LEARN_EVERY_N_MESSAGES) {
+      messagesSinceLastLearn = 0;
+      learnInBackground(chatId);
+    }
+
+    return text || "No response from Claude.";
+  } finally {
+    if (typingInterval) clearInterval(typingInterval);
+  }
+}
+
 /**
  * Run a background learning pass — reviews recent conversation history
  * and updates personality files (memory.md, user.md, tools.md)
