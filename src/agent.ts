@@ -49,6 +49,22 @@ function getTimeContext(): string {
   return `[Current time: ${formatted} | ${timeOfDay} in Lucknow, India]`;
 }
 
+function loadDailyMemory(): string {
+  const memoryDir = join(import.meta.dir, "..", "memory");
+  const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }); // YYYY-MM-DD
+  const yesterday = new Date(Date.now() - 86400000).toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+
+  const parts: string[] = [];
+  for (const date of [yesterday, today]) {
+    try {
+      const content = readFileSync(join(memoryDir, `${date}.md`), "utf8").trim();
+      if (content) parts.push(`[Memory log ${date}]\n${content}`);
+    } catch {}
+  }
+
+  return parts.length > 0 ? parts.join("\n\n") : "";
+}
+
 function loadPersonality(voiceMode: boolean): string {
   const files = ["identity.md", "soul.md", "user.md", "rules.md", "tools.md", "memory.md"];
   if (voiceMode) files.push("voice.md");
@@ -62,6 +78,11 @@ function loadPersonality(voiceMode: boolean): string {
       // File missing — skip
     }
   }
+
+  // Append daily memory logs
+  const daily = loadDailyMemory();
+  if (daily) sections.push(daily);
+
   return sections.join("\n\n---\n\n");
 }
 
@@ -146,20 +167,20 @@ function learnInBackground(chatId: string) {
     .map((m: Message) => `${m.role === "user" ? "Human" : "Assistant"}: ${m.content}`)
     .join("\n\n");
 
-  const learnPrompt = `Review this recent conversation and update the personality/memory files if you learned anything new.
+  const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+
+  const learnPrompt = `Review this recent conversation and update memory files if you learned anything new.
 
 ## Recent Conversation
 ${conversation}
 
-## Your Task
-1. Read /home/pi/AI/personality/memory.md
-2. If you learned new preferences, systems, patterns, or lessons — update the relevant section
-3. Read /home/pi/AI/personality/user.md — update if you learned something new about the boss
-4. Read /home/pi/AI/personality/tools.md — update if you discovered new infrastructure
-5. Keep entries concise. One line per fact. Don't duplicate existing entries
-6. If nothing new was learned, do nothing
+## Your Tasks
+1. Read /home/pi/AI/personality/memory.md — update if there are new durable facts (preferences, systems, lessons)
+2. Read /home/pi/AI/personality/user.md — update if you learned something new about the boss
+3. Read /home/pi/AI/personality/tools.md — update if you discovered new infrastructure
+4. Write a brief session summary to /home/pi/AI/memory/${today}.md — append a timestamped one-liner about what was discussed
 
-Only update files if there's genuinely new information. Don't rewrite existing content.`;
+Keep entries concise. Don't duplicate. Don't rewrite existing content. Append only.`;
 
   const args = [
     "--print",
