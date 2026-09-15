@@ -2,7 +2,7 @@
 
 A persistent, always-on AI agent that runs on a Raspberry Pi and communicates via Telegram. Pi acts as your Chief Security Officer and sysadmin — monitoring infrastructure, detecting threats, running health checks, and handling day-to-day ops through natural conversation.
 
-Built on Claude Code as the AI backend, with a multi-file personality system inspired by [OpenClaw](https://github.com/openclaw/openclaw).
+Built on Claude Code as the AI backend, with a multi-file personality system inspired by [OpenClaw](https://github.com/openclaw/openclaw). 
 
 ## Features
 
